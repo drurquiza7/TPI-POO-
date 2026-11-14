@@ -1,6 +1,9 @@
 package ar.edu.unsada.stock.ui;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Scanner;
@@ -11,10 +14,13 @@ import org.springframework.stereotype.Component;
 
 import ar.edu.unsada.stock.exception.NegocioException;
 import ar.edu.unsada.stock.model.Articulo;
+import ar.edu.unsada.stock.model.CompraProveedor;
+import ar.edu.unsada.stock.model.DetalleCompra;
 import ar.edu.unsada.stock.model.Proveedor;
 import ar.edu.unsada.stock.model.Rubro;
-import ar.edu.unsada.stock.repository.ProveedorRepository;
 import ar.edu.unsada.stock.service.ArticuloService;
+import ar.edu.unsada.stock.service.CompraService;
+import ar.edu.unsada.stock.service.ProveedorService;
 import ar.edu.unsada.stock.service.RubroService;
 
 /**
@@ -27,17 +33,17 @@ public class MenuConsola implements CommandLineRunner {
 
     private final RubroService rubroService;
     private final ArticuloService articuloService;
-    // Solo para mostrar los proveedores al cargar un articulo.
-    // En la Etapa 2 se reemplaza por ProveedorService.
-    private final ProveedorRepository proveedorRepository;
+    private final ProveedorService proveedorService;
+    private final CompraService compraService;
 
     private final Scanner scanner = new Scanner(System.in);
 
     public MenuConsola(RubroService rubroService, ArticuloService articuloService,
-                       ProveedorRepository proveedorRepository) {
+                       ProveedorService proveedorService, CompraService compraService) {
         this.rubroService = rubroService;
         this.articuloService = articuloService;
-        this.proveedorRepository = proveedorRepository;
+        this.proveedorService = proveedorService;
+        this.compraService = compraService;
     }
 
     @Override
@@ -71,7 +77,7 @@ public class MenuConsola implements CommandLineRunner {
             switch (opcion) {
                 case 1 -> menuRubros();
                 case 2 -> menuArticulos();
-                case 3 -> System.out.println("Modulo en desarrollo - Etapa 2");
+                case 3 -> menuProveedoresYCompras();
                 case 4 -> System.out.println("Modulo en desarrollo - Etapa 3");
                 case 0 -> System.out.println("Hasta luego!");
                 default -> System.out.println("Opcion invalida.");
@@ -221,7 +227,7 @@ public class MenuConsola implements CommandLineRunner {
         mostrarRubros(rubroService.listar());
         String codigoRubro = leerTexto("Codigo del rubro: ");
 
-        mostrarProveedores();
+        mostrarProveedores(proveedorService.listar());
         String codigoProveedor = leerTexto("Codigo del proveedor (Enter = sin proveedor): ");
 
         int stockActual = leerEntero("Stock inicial: ");
@@ -346,18 +352,249 @@ public class MenuConsola implements CommandLineRunner {
         System.out.println("Total: " + articulos.size() + "   (* = en stock minimo)");
     }
 
-    private void mostrarProveedores() {
-        List<Proveedor> proveedores = proveedorRepository.findAll();
-        System.out.println();
-        System.out.printf("%-8s %s%n", "CODIGO", "PROVEEDOR");
-        System.out.println("-".repeat(45));
-        for (Proveedor proveedor : proveedores) {
-            System.out.printf("%-8s %s%n", proveedor.getCodigo(), proveedor.getRazonSocial());
+    private String nombreProveedor(Articulo articulo) {
+        return articulo.getProveedor() == null ? "(sin proveedor)" : articulo.getProveedor().getRazonSocial();
+    }
+
+    // =====================================================
+    //                 PROVEEDORES Y COMPRAS
+    // =====================================================
+
+    private void menuProveedoresYCompras() {
+        int opcion;
+        do {
+            System.out.println();
+            System.out.println("------ GESTION DE PROVEEDORES Y COMPRAS ------");
+            System.out.println(" 1. Alta de proveedor");
+            System.out.println(" 2. Baja de proveedor");
+            System.out.println(" 3. Modificar proveedor");
+            System.out.println(" 4. Buscar proveedor");
+            System.out.println(" 5. Listar proveedores");
+            System.out.println(" 6. Registrar compra a proveedor");
+            System.out.println(" 7. Listar compras");
+            System.out.println(" 8. Listar compras por rango de fechas");
+            System.out.println(" 0. Volver");
+            opcion = leerEntero("Opcion: ");
+
+            try {
+                switch (opcion) {
+                    case 1 -> altaProveedor();
+                    case 2 -> bajaProveedor();
+                    case 3 -> modificarProveedor();
+                    case 4 -> buscarProveedor();
+                    case 5 -> mostrarProveedores(proveedorService.listar());
+                    case 6 -> registrarCompra();
+                    case 7 -> mostrarCompras(compraService.listar());
+                    case 8 -> listarComprasPorFechas();
+                    case 0 -> { }
+                    default -> System.out.println("Opcion invalida.");
+                }
+            } catch (NegocioException e) {
+                System.out.println("ERROR: " + e.getMessage());
+            }
+        } while (opcion != 0);
+    }
+
+    // ---------------- Proveedores ----------------
+
+    private void altaProveedor() {
+        System.out.println("-- Alta de proveedor --");
+        String codigo = leerTexto("Codigo: ");
+        String cuit = leerTexto("CUIT: ");
+        String razonSocial = leerTexto("Razon social: ");
+        String direccion = leerTexto("Direccion: ");
+        String telefono = leerTexto("Telefono: ");
+        String email = leerTexto("Email: ");
+
+        Proveedor proveedor = proveedorService.alta(codigo, cuit, razonSocial, direccion, telefono, email);
+        System.out.println("Proveedor creado: " + proveedor);
+    }
+
+    private void bajaProveedor() {
+        System.out.println("-- Baja de proveedor --");
+        Proveedor proveedor = proveedorService.buscarPorCodigo(leerTexto("Codigo del proveedor: "));
+
+        if (confirmar("Eliminar el proveedor " + proveedor + "?")) {
+            proveedorService.baja(proveedor.getCodigo());
+            System.out.println("Proveedor eliminado.");
+        } else {
+            System.out.println("Operacion cancelada.");
         }
     }
 
-    private String nombreProveedor(Articulo articulo) {
-        return articulo.getProveedor() == null ? "(sin proveedor)" : articulo.getProveedor().getRazonSocial();
+    private void modificarProveedor() {
+        System.out.println("-- Modificar proveedor (Enter deja el valor actual) --");
+        Proveedor proveedor = proveedorService.buscarPorCodigo(leerTexto("Codigo del proveedor: "));
+
+        String cuit = leerTextoOpcional("CUIT", proveedor.getCuit());
+        String razonSocial = leerTextoOpcional("Razon social", proveedor.getRazonSocial());
+        String direccion = leerTextoOpcional("Direccion", proveedor.getDireccion());
+        String telefono = leerTextoOpcional("Telefono", proveedor.getTelefono());
+        String email = leerTextoOpcional("Email", proveedor.getEmail());
+
+        proveedorService.modificar(proveedor.getCodigo(), cuit, razonSocial, direccion, telefono, email);
+        System.out.println("Proveedor modificado.");
+    }
+
+    private void buscarProveedor() {
+        System.out.println("-- Buscar proveedor --");
+        System.out.println(" 1. Por codigo");
+        System.out.println(" 2. Por razon social");
+        int opcion = leerEntero("Opcion: ");
+
+        if (opcion == 1) {
+            Proveedor proveedor = proveedorService.buscarPorCodigo(leerTexto("Codigo: "));
+            mostrarProveedores(List.of(proveedor));
+        } else if (opcion == 2) {
+            mostrarProveedores(proveedorService.buscarPorRazonSocial(leerTexto("Razon social contiene: ")));
+        } else {
+            System.out.println("Opcion invalida.");
+        }
+    }
+
+    private void mostrarProveedores(List<Proveedor> proveedores) {
+        if (proveedores.isEmpty()) {
+            System.out.println("No hay proveedores para mostrar.");
+            return;
+        }
+        System.out.println();
+        System.out.printf("%-8s %-30s %-14s %-16s %s%n", "CODIGO", "RAZON SOCIAL", "CUIT", "TELEFONO", "EMAIL");
+        System.out.println("-".repeat(100));
+        for (Proveedor p : proveedores) {
+            System.out.printf("%-8s %-30s %-14s %-16s %s%n",
+                    p.getCodigo(), p.getRazonSocial(), p.getCuit(), p.getTelefono(), p.getEmail());
+        }
+        System.out.println("Total: " + proveedores.size());
+    }
+
+    // ---------------- Compras ----------------
+
+    private void registrarCompra() {
+        System.out.println("-- Registrar compra a proveedor --");
+
+        // El codigo y el proveedor se validan antes de cargar renglones,
+        // para no hacerle tipear todo al usuario y que falle al final
+        String codigo = compraService.validarCodigoDisponible(leerTexto("Codigo de la compra: "));
+
+        mostrarProveedores(proveedorService.listar());
+        Proveedor proveedor = proveedorService.buscarPorCodigo(leerTexto("Codigo del proveedor: "));
+
+        LocalDate fecha = leerFechaOpcional("Fecha de la compra (AAAA-MM-DD)", LocalDate.now());
+
+        List<DetalleCompra> renglones = cargarRenglonesDeCompra();
+        if (renglones.isEmpty()) {
+            System.out.println("No se cargaron articulos. Compra cancelada.");
+            return;
+        }
+
+        System.out.println();
+        System.out.println("RESUMEN DE LA COMPRA " + codigo);
+        System.out.println("Proveedor: " + proveedor + "   Fecha: " + fecha);
+        mostrarRenglonesDeCompra(renglones);
+        System.out.printf("TOTAL: %.2f%n", calcularTotal(renglones));
+
+        if (!confirmar("Confirma la compra?")) {
+            System.out.println("Compra cancelada. No se modifico el stock.");
+            return;
+        }
+
+        CompraProveedor compra = compraService.registrar(codigo, proveedor.getCodigo(), fecha, renglones);
+        System.out.printf("Compra %s registrada. Total: %.2f. Stock actualizado.%n",
+                compra.getCodigo(), compra.getTotal());
+    }
+
+    // Pide articulos en un bucle hasta que el usuario deja el codigo vacio
+    private List<DetalleCompra> cargarRenglonesDeCompra() {
+        List<DetalleCompra> renglones = new ArrayList<>();
+        System.out.println("Carga de articulos (Enter en el codigo para terminar)");
+
+        while (true) {
+            String codigoArticulo = leerTexto("Codigo del articulo: ");
+            if (codigoArticulo.isEmpty()) {
+                break;
+            }
+
+            // Un error en un renglon no cancela toda la compra: se avisa y se pide otro
+            try {
+                Articulo articulo = articuloService.buscarPorCodigo(codigoArticulo);
+                if (yaEstaCargado(renglones, articulo)) {
+                    System.out.println("Ese articulo ya esta en la compra.");
+                    continue;
+                }
+                System.out.println("  " + articulo.getDescripcion() + " | stock actual: " + articulo.getStockActual());
+
+                int cantidad = leerEntero("  Cantidad: ");
+                BigDecimal costo = leerDecimal("  Costo unitario: ");
+                if (cantidad <= 0 || costo.compareTo(BigDecimal.ZERO) <= 0) {
+                    System.out.println("La cantidad y el costo deben ser mayores a cero. Renglon descartado.");
+                    continue;
+                }
+
+                DetalleCompra renglon = new DetalleCompra(articulo, cantidad, costo);
+                renglones.add(renglon);
+                System.out.printf("  Renglon agregado. Subtotal: %.2f | Total parcial: %.2f%n",
+                        renglon.getSubtotal(), calcularTotal(renglones));
+            } catch (NegocioException e) {
+                System.out.println("ERROR: " + e.getMessage());
+            }
+        }
+        return renglones;
+    }
+
+    private boolean yaEstaCargado(List<DetalleCompra> renglones, Articulo articulo) {
+        for (DetalleCompra renglon : renglones) {
+            if (renglon.getArticulo().getCodigo().equals(articulo.getCodigo())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private BigDecimal calcularTotal(List<DetalleCompra> renglones) {
+        BigDecimal total = BigDecimal.ZERO;
+        for (DetalleCompra renglon : renglones) {
+            total = total.add(renglon.getSubtotal());
+        }
+        return total;
+    }
+
+    private void listarComprasPorFechas() {
+        System.out.println("-- Compras por rango de fechas --");
+        LocalDate fechaDesde = leerFecha("Fecha desde (AAAA-MM-DD): ");
+        LocalDate fechaHasta = leerFecha("Fecha hasta (AAAA-MM-DD): ");
+
+        mostrarCompras(compraService.listarPorFechas(fechaDesde, fechaHasta));
+    }
+
+    // Muestra cada compra con su cabecera y sus renglones
+    private void mostrarCompras(List<CompraProveedor> compras) {
+        if (compras.isEmpty()) {
+            System.out.println("No hay compras para mostrar.");
+            return;
+        }
+        BigDecimal totalGeneral = BigDecimal.ZERO;
+        for (CompraProveedor compra : compras) {
+            System.out.println();
+            System.out.println("=".repeat(80));
+            System.out.println("COMPRA " + compra.getCodigo() + "   Fecha: " + compra.getFechaCompra()
+                    + "   Proveedor: " + compra.getProveedor());
+            mostrarRenglonesDeCompra(compra.getDetalles());
+            System.out.printf("%65s %13.2f%n", "TOTAL:", compra.getTotal());
+            totalGeneral = totalGeneral.add(compra.getTotal());
+        }
+        System.out.println();
+        System.out.printf("Compras: %d   Importe total: %.2f%n", compras.size(), totalGeneral);
+    }
+
+    private void mostrarRenglonesDeCompra(List<DetalleCompra> renglones) {
+        System.out.printf("%-8s %-30s %9s %15s %13s%n",
+                "CODIGO", "DESCRIPCION", "CANTIDAD", "COSTO UNITARIO", "SUBTOTAL");
+        System.out.println("-".repeat(80));
+        for (DetalleCompra renglon : renglones) {
+            System.out.printf("%-8s %-30s %9d %15.2f %13.2f%n",
+                    renglon.getArticulo().getCodigo(), renglon.getArticulo().getDescripcion(),
+                    renglon.getCantidad(), renglon.getCostoUnitario(), renglon.getSubtotal());
+        }
     }
 
     // =====================================================
@@ -394,6 +631,17 @@ public class MenuConsola implements CommandLineRunner {
         }
     }
 
+    private LocalDate leerFecha(String mensaje) {
+        while (true) {
+            String texto = leerTexto(mensaje);
+            try {
+                return LocalDate.parse(texto);
+            } catch (DateTimeParseException e) {
+                System.out.println("Fecha invalida. Use el formato AAAA-MM-DD (ej: 2026-11-13).");
+            }
+        }
+    }
+
     private String leerTextoOpcional(String etiqueta, String valorActual) {
         String texto = leerTexto(etiqueta + " [" + valorActual + "]: ");
         return texto.isEmpty() ? valorActual : texto;
@@ -423,6 +671,20 @@ public class MenuConsola implements CommandLineRunner {
                 return new BigDecimal(texto);
             } catch (NumberFormatException e) {
                 System.out.println("Ingrese un importe valido (ej: 1500.50).");
+            }
+        }
+    }
+
+    private LocalDate leerFechaOpcional(String etiqueta, LocalDate valorActual) {
+        while (true) {
+            String texto = leerTexto(etiqueta + " [" + valorActual + "]: ");
+            if (texto.isEmpty()) {
+                return valorActual;
+            }
+            try {
+                return LocalDate.parse(texto);
+            } catch (DateTimeParseException e) {
+                System.out.println("Fecha invalida. Use el formato AAAA-MM-DD (ej: 2026-11-13).");
             }
         }
     }
